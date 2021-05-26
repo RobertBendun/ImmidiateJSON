@@ -71,13 +71,13 @@ static void write_quoted(std::function<void(std::string_view)> &writer, std::str
 	unsigned start = 0;
 	for (unsigned i = 0; i < value.size(); ++i) {
 		if (value[i] == '\"') {
-			writer(value.substr(start, i));
+			writer(value.substr(start, i - start));
 			writer("\\\"");
 			start = i + 1;
 		}
 	}
 
-	if (start < value.size()) {
+	if (start < value.size() - 1) {
 		writer(value.substr(start));
 	}
 	writer("\"");
