@@ -3,8 +3,9 @@
 
 #include <cstdint>
 #include <string_view>
-#include <iostream>
+#include <ostream>
 #include <stack>
+#include <functional>
 
 struct Json
 {
@@ -19,7 +20,7 @@ struct Json
 	Scope(Object, "}");
 	Scope(Array, "]");
 #undef Scope
-	
+
 	auto write_to(std::ostream& os) -> void;
 	auto end() -> void;
 
@@ -47,15 +48,10 @@ private:
 		Print_Comma,
 	};
 
-	template<typename ...Args>
-	inline void print(Args const& ...args)
-	{
-		(void)(*out << ... << args);
-	}
-
 	auto end(std::string_view end) -> void;
+	static auto default_writer(std::string_view) -> void;
 
-	std::ostream *out = &std::cout;
+	std::function<void(std::string_view)> writer = &Json::default_writer;
 	std::stack<State> state;
 };
 
@@ -63,23 +59,45 @@ private:
 
 #ifdef IMM_JSON_IMPLEMENTATION
 
+#include <array>
+#include <charconv>
 #include <iomanip>
+#include <iostream>
+#include <limits>
 
-auto Json::write_to(std::ostream& out) -> void
+static void write_quoted(std::function<void(std::string_view)> &writer, std::string_view value)
 {
-	this->out = &out;
+	writer("\"");
+	unsigned start = 0;
+	for (unsigned i = 0; i < value.size(); ++i) {
+		if (value[i] == '\"') {
+			writer(value.substr(start, i));
+			writer("\\\"");
+			start = i + 1;
+		}
+	}
+
+	if (start < value.size()) {
+		writer(value.substr(start));
+	}
+	writer("\"");
+}
+
+auto Json::default_writer(std::string_view sv) -> void
+{
+	std::cout << sv;
 }
 
 auto Json::array() -> Array_Scope
 {
-	print("[");
+	writer("[");
 	state.push(State::Array);
 	return Array_Scope{this};
 }
 
 auto Json::object() -> Object_Scope
 {
-	print("{");
+	writer("{");
 	state.push(State::Object);
 	return Object_Scope{this};
 }
@@ -87,16 +105,17 @@ auto Json::object() -> Object_Scope
 auto Json::key(std::string_view key) -> Json&
 {
 	if (!state.empty() && state.top() == State::Print_Comma) {
-		print(",");
+		writer(",");
 		state.pop();
 	}
-	print(std::quoted(key), ":");
+	write_quoted(writer, key);
+	writer(":");
 	return *this;
 }
 
 auto Json::end(std::string_view sv) -> void
 {
-	print(sv);
+	writer(sv);
 	if (state.top() == State::Print_Comma)
 		state.pop();
 	state.pop();
@@ -108,19 +127,32 @@ auto Json::end(std::string_view sv) -> void
 	auto Json::operator=(param) -> Json& \
 	{ \
 		if (!state.empty() && state.top() == State::Print_Comma) { \
-			print(","); \
+			writer(","); \
 			state.pop(); \
 		}
-	
+
 #define End	\
 	if (!state.empty()) \
 		state.push(State::Print_Comma); \
 	return *this; \
 	}
 
-Begin(std::nullptr_t) print("null"); End
-Begin(bool value)	    print(value ? "true" : "false"); End
-Begin(double value)   print(value); End
-Begin(std::string_view value) print(std::quoted(value)); End
+Begin(std::nullptr_t) writer("null"); End
+Begin(bool value)	    writer(value ? "true" : "false"); End
+
+Begin(double value)
+	constexpr auto Size = std::numeric_limits<decltype(value)>::max_digits10;
+	std::array<char, Size + 1> buffer = {};
+
+	auto [ptr, ec] = std::to_chars(std::begin(buffer), std::end(buffer), value);
+	if (ptr == std::end(buffer)) {
+		return *this;
+	}
+	writer({ std::begin(buffer), ptr });
+End
+
+Begin(std::string_view value)
+	write_quoted(writer, value);
+End
 
 #endif

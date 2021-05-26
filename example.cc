@@ -4,7 +4,6 @@
 auto main() -> int
 {
 	Json json;
-	json.write_to(std::cout);
 
 	auto _object = json.object();
 
